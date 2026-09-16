@@ -1,0 +1,10 @@
+## Ignore Visual Studio / .NET temporary and build files
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+appsettings.Development.json
+*.log
