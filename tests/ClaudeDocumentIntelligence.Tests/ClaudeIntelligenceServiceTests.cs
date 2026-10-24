@@ -24,13 +24,13 @@ public class ClaudeIntelligenceServiceTests
         }
     }
 
-    private static ClaudeIntelligenceService CreateService(HttpMessageHandler handler, string apiKey = "test-key")
+    private static ClaudeIntelligenceService CreateService(HttpMessageHandler handler, string apiKey = "test-key", string? model = "test-model")
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Anthropic:ApiKey"] = apiKey,
-                ["Anthropic:Model"] = "test-model"
+                ["Anthropic:Model"] = model
             })
             .Build();
         return new ClaudeIntelligenceService(new HttpClient(handler), config, NullLogger<ClaudeIntelligenceService>.Instance);
@@ -113,5 +113,70 @@ public class ClaudeIntelligenceServiceTests
         Assert.Null(handler.Request);
         Assert.False(result.IsSigned);
         Assert.Contains("Missing authorized claimant signature.", result.DetectedAnomalies);
+    }
+
+    [Fact]
+    public async Task Request_OmitsSamplingParams_AndUsesLowEffort()
+    {
+        var handler = new CapturingHandler(HttpStatusCode.OK, ClaudeResponse(new { claimant_name = "x" }));
+        await CreateService(handler).ExtractClaimStructuredDataAsync(Doc);
+
+        using var req = JsonDocument.Parse(handler.RequestBody!);
+        var root = req.RootElement;
+        Assert.False(root.TryGetProperty("temperature", out _), "Current Claude models return 400 when temperature is set");
+        Assert.False(root.TryGetProperty("top_p", out _));
+        Assert.False(root.TryGetProperty("top_k", out _));
+        Assert.Equal("low", root.GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.True(root.GetProperty("max_tokens").GetInt32() >= 4096);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task MissingModelConfig_DefaultsToCurrentSonnet(string? configuredModel)
+    {
+        var handler = new CapturingHandler(HttpStatusCode.OK, ClaudeResponse(new { claimant_name = "x" }));
+        var service = CreateService(handler, model: configuredModel);
+        await service.ExtractClaimStructuredDataAsync(Doc);
+
+        using var req = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal("claude-sonnet-5-5", req.RootElement.GetProperty("model").GetString());
+        Assert.Equal("claude-sonnet-5-5", service.ModelName);
+    }
+
+    [Fact]
+    public async Task Response_WithThinkingBlockFirst_ParsesTheTextBlock()
+    {
+        var answer = JsonSerializer.Serialize(new { claimant_name = "Ada Lovelace", extraction_confidence = 0.9 });
+        var body = JsonSerializer.Serialize(new
+        {
+            content = new object[]
+            {
+                new { type = "thinking", thinking = "", signature = "sig" },
+                new { type = "text", text = answer }
+            }
+        });
+        var result = await CreateService(new CapturingHandler(HttpStatusCode.OK, body)).ExtractClaimStructuredDataAsync(Doc);
+
+        Assert.Equal("Ada Lovelace", result.ClaimantName);
+        Assert.Equal(0.9, result.ExtractionConfidence);
+    }
+
+    [Fact]
+    public void ExtractFirstTextBlock_StripsMarkdownCodeFence()
+    {
+        var body = JsonSerializer.Serialize(new { content = new[] { new { type = "text", text = "```json\n{\"a\":1}\n```" } } });
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal("{\"a\":1}", ClaudeIntelligenceService.ExtractFirstTextBlock(doc.RootElement));
+    }
+
+    [Fact]
+    public async Task Response_WithNoTextBlock_ReturnsErrorModel()
+    {
+        var body = JsonSerializer.Serialize(new { content = new[] { new { type = "thinking", thinking = "" } } });
+        var result = await CreateService(new CapturingHandler(HttpStatusCode.OK, body)).ExtractClaimStructuredDataAsync(Doc);
+
+        Assert.Equal(0.0, result.ExtractionConfidence);
+        Assert.Contains(result.DetectedAnomalies, a => a.Contains("no text block"));
     }
 }

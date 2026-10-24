@@ -41,7 +41,7 @@ public class WorkflowOrchestrator : IWorkflowOrchestrator
             Action: action,
             RoutingReason: reason,
             ProcessedAtUtc: DateTime.UtcNow,
-            ModelUsed: "claude-3-5-sonnet",
+            ModelUsed: _aiService.ModelName ?? "unknown",
             ProcessingDuration: stopwatch.Elapsed
         );
 

@@ -14,6 +14,11 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
     private readonly string _apiKey;
     private readonly string _model;
 
+    /// <summary>Default model. Claude Sonnet 3.5 was retired on October 28, 2025.</summary>
+    public const string DefaultModel = "claude-sonnet-5-5";
+
+    public string ModelName => _model;
+
     private const string SystemPrompt = """
         You are an elite Document Intelligence AI specialized in legal, insurance, and fiduciary claim processing.
         Your task is to extract structured entities from unstructured documents accurately.
@@ -33,7 +38,7 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
         _httpClient = httpClient;
         _logger = logger;
         _apiKey = configuration["Anthropic:ApiKey"] ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? string.Empty;
-        _model = configuration["Anthropic:Model"] ?? "claude-3-5-sonnet-20241022";
+        _model = string.IsNullOrWhiteSpace(configuration["Anthropic:Model"]) ? DefaultModel : configuration["Anthropic:Model"]!;
     }
 
     public async Task<ExtractedClaimData> ExtractClaimStructuredDataAsync(
@@ -53,8 +58,11 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
             var requestBody = new
             {
                 model = _model,
-                max_tokens = 1024,
-                temperature = 0.0, // Deterministic extraction
+                // Headroom for adaptive thinking, which is on by default for current models.
+                max_tokens = 4096,
+                // Current Claude models reject temperature/top_p/top_k with a 400 error.
+                // Low effort keeps simple extraction fast and minimizes thinking.
+                output_config = new { effort = "low" },
                 system = SystemPrompt,
                 messages = new[]
                 {
@@ -103,10 +111,9 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
 
             var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
             using var doc = JsonDocument.Parse(responseString);
-            var contentText = doc.RootElement
-                .GetProperty("content")[0]
-                .GetProperty("text")
-                .GetString() ?? "{}";
+            // With adaptive thinking, "thinking" blocks can precede the answer,
+            // so read the first "text" block rather than assuming content[0].
+            var contentText = ExtractFirstTextBlock(doc.RootElement);
 
             var extracted = JsonSerializer.Deserialize<ExtractedClaimData>(contentText, new JsonSerializerOptions
             {
@@ -125,6 +132,29 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
                 DetectedAnomalies = [$"API Exception: {ex.Message}"]
             };
         }
+    }
+
+    public static string ExtractFirstTextBlock(JsonElement root)
+    {
+        foreach (var block in root.GetProperty("content").EnumerateArray())
+        {
+            if (block.TryGetProperty("type", out var type) && type.GetString() == "text")
+            {
+                return StripCodeFence(block.GetProperty("text").GetString() ?? "{}");
+            }
+        }
+        throw new InvalidOperationException("Claude response contained no text block.");
+    }
+
+    private static string StripCodeFence(string text)
+    {
+        var trimmed = text.Trim();
+        if (!trimmed.StartsWith("```")) return trimmed;
+        var firstNewline = trimmed.IndexOf('\n');
+        var lastFence = trimmed.LastIndexOf("```");
+        return firstNewline >= 0 && lastFence > firstNewline
+            ? trimmed[(firstNewline + 1)..lastFence].Trim()
+            : trimmed;
     }
 
     private static ExtractedClaimData GenerateMockExtraction(RawDocument document)

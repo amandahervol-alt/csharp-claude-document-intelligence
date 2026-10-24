@@ -35,7 +35,7 @@ flowchart TD
 ## 🚀 Key Features
 
 * **Strongly-Typed Domain Models**: Fully typed C# records with `System.Text.Json` property bindings, validation attributes, and immutable data structures.
-* **Claude 3.5 Sonnet Integration**: Connects to the Anthropic Messages API with strict system boundary prompts, temperature `0.0` for deterministic extraction, and JSON schema enforcement.
+* **Claude Sonnet 5.5 Integration**: Connects to the Anthropic Messages API (`claude-sonnet-5-5` by default, configurable via `Anthropic:Model`) with strict system boundary prompts, low effort for fast extraction, and JSON schema enforcement. Current Claude models reject `temperature`, so it is not sent.
 * **Human-in-the-Loop (HITL) Gate**: Enforces business rules:
   * Missing signatures automatically route to human review.
   * Claims exceeding threshold amounts ($5,000+) require manual sign-off.

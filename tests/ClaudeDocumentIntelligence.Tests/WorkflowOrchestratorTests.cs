@@ -123,4 +123,18 @@ public class WorkflowOrchestratorTests
         Assert.Equal(RoutingAction.RequiresHumanReview, outcome.Action);
         Assert.Contains("exceeds autonomous approval threshold", outcome.RoutingReason);
     }
+
+    [Fact]
+    public async Task ProcessDocument_RecordsModelFromService()
+    {
+        var testDoc = new RawDocument("DOC-M", "Claim", "Content", DateTime.UtcNow);
+        _mockAiService.SetupGet(x => x.ModelName).Returns("claude-sonnet-5-5");
+        _mockAiService
+            .Setup(x => x.ExtractClaimStructuredDataAsync(testDoc, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExtractedClaimData { IsSigned = true, ExtractionConfidence = 0.95, RequestedAmount = 10m, DetectedAnomalies = [] });
+
+        var outcome = await new WorkflowOrchestrator(_mockAiService.Object, _mockLogger.Object).ProcessDocumentWorkflowAsync(testDoc);
+
+        Assert.Equal("claude-sonnet-5-5", outcome.ModelUsed);
+    }
 }
