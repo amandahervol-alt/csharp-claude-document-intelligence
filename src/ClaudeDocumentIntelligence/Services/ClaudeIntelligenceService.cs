@@ -61,16 +61,16 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
                     new
                     {
                         role = "user",
-                        content = $"""
+                        content = $$"""
                             Extract the structured claim data from the following document text:
                             ---
-                            Document ID: {document.DocumentId}
-                            Type: {document.DocumentType}
+                            Document ID: {{document.DocumentId}}
+                            Type: {{document.DocumentType}}
                             Content:
-                            {document.Content}
+                            {{document.Content}}
                             ---
                             Return JSON adhering to schema:
-                            {{
+                            {
                               "claimant_name": "string",
                               "case_reference_number": "string",
                               "claim_type": "string",
@@ -80,7 +80,7 @@ public class ClaudeIntelligenceService : IClaudeIntelligenceService
                               "summary_of_loss": "string",
                               "extraction_confidence": float between 0.0 and 1.0,
                               "detected_anomalies": ["string"]
-                            }}
+                            }
                             """
                     }
                 }
